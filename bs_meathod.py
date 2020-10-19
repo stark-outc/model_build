@@ -18,7 +18,7 @@ from sqlalchemy import create_engine
 
 
 engine_outer = create_engine(
-    "mysql+pymysql://hzphdata_test:On1moBvlecAJ76Aa@rm-uf64ke75ks7qhx2fq.mysql.rds.aliyuncs.com:3306/risk-data-testing?charset=utf8mb4")
+    "mysql+pymysql:")
 
 class XgbParameterSelect:
     def __init__(self, param_grid, grid_search):
