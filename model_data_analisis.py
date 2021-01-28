@@ -7,6 +7,9 @@ import numpy as np
 import pickle
 import matplotlib.pyplot as plt
 import seaborn as sns
+from tdqm import tdqm
+from scipy.stats import mode
+from sklearn.preprocessing import LabelEncoder,OneHotEncoder
 sns.set(style="darkgrid", palette="muted", color_codes=True, context='paper')
 sns.set_style({'font.sans-serif': ['simhei', 'Arial']})
 
@@ -96,7 +99,7 @@ def profile_html(df,title):
 # 查看数据中特征缺失，唯一值情况
 def nuique_missing_value(df):
     data = reduce_mem_usage(df)
-    print(f'there are {data.isnull.any().sum()} columns in dataset with missing values')
+    print(f'there are {data.isnull().any().sum()} columns in dataset with missing values')
 
     # have_null_fea_dict = (data.isnull().sum()/len(data)).to_dict
     # fea_null_morethanhalf = {}
@@ -112,14 +115,44 @@ def nuique_missing_value(df):
     print(f'there are {len(one_value_fea)} columns in data with one unique values and they are \n{one_value_fea}')
     return one_value_fea
 
+# 时间特征处理
+def date_proc(x):
+    # exam:'20040512'
+    m = int(x[4:6])
+    if m == 0:
+        m = 1
+    return x[:4] + '-' + str(m) + '-' + x[6:]
+
+def num_to_date(df,date_cols):
+    for f in tqdm(date_cols):
+        df[f] = pd.to_datetime(df[f].astype('str').apply(date_proc))
+        df[f + '_year'] = df[f].dt.year
+        df[f + '_month'] = df[f].dt.month
+        df[f + '_day'] = df[f].dt.day
+        df[f + '_dayofweek'] = df[f].dt.dayofweek
+    plt.figure()
+    plt.figure(figsize=(16, 6))
+    i = 1
+    for f in date_cols:
+        for col in ['year', 'month', 'day', 'dayofweek']:
+            plt.subplot(2, 4, i)
+            i += 1
+            v = df[f + '_' + col].value_counts()
+            fig = sns.barplot(x=v.index, y=v.values)
+            for item in fig.get_xticklabels():
+                item.set_rotation(90)
+            plt.title(f + '_' + col)
+    plt.tight_layout()
+    plt.show()
+    return df
 # 特征数值类型及对象类型
 def feature_type(df):
     data = reduce_mem_usage(df)
     numerical_fea = list(data.select_dtypes(exclude=['category']).columns)
     category_fea = list(filter(lambda x:x not in numerical_fea,list(data.columns)))
     #划分数值型变量中的连续型变量和离散型变量
-    numerical_serial_fea = [col for col in numerical_fea if data[col].nunique>10]
-    numerical_noserial_fea = [col for col in numerical_fea if data[col].nunique<=10]
+    numerical_serial_fea = [col for col in numerical_fea if data[col].nunique()>10]
+    numerical_noserial_fea = [col for col in numerical_fea if data[col].nunique()<=10]
     # 离散型变量查看
     for col in numerical_noserial_fea:
         print(data[col].value_counts())
@@ -130,6 +163,22 @@ def feature_type(df):
     g = g.map(sns.distplot,"value")
     return numerical_fea,category_fea
 
+# 分类变量统计
+def sta_cate(df, category_fea):
+    sta_df = pd.DataFrame(
+        columns=['column', 'nunique', 'miss_rate', 'most_value', 'most_value_counts', 'max_value_counts_rate'])
+    for col in category_fea:
+        count = df[col].count()
+        nunique = df[col].nunique()
+        miss_rate = (df.shape[0] - count) / df.shape[0]
+        most_value = df[col].value_counts().index[0]
+        most_value_counts = df[col].value_counts().values[0]
+        max_value_counts_rate = most_value_counts / df.shape[0]
+
+        sta_df = sta_df.append({'column': col, 'nunique': nunique, 'miss_rate': miss_rate, 'most_value': most_value,
+                                'most_value_counts': most_value_counts, 'max_value_counts_rate': max_value_counts_rate},
+                               ignore_index=True)
+    return sta_df
 # 变量分布可视化
 class var_dist_plot(object):
     def __init__(self,df,label,category_fea,numrical_serial_fea):
@@ -200,13 +249,84 @@ class var_dist_plot(object):
                                '{:1.2f}%'.format(height / total_amt * 100),
                                ha="center", fontsize=15)
             plt.show()
+# 分类变量编码
+def cate_encoder(df,  cols):
+    le = LabelEncoder()
+    ohe = OneHotEncoder(sparse=False, categories='auto')
+
+    for col in cols:
+        print(col + ':')
+        print(set(df[col]))
+
+        le = le.fit(df[col])
+        integer_encoded = le.transform(df[col])
+        # binary encode
+        integer_encoded = integer_encoded.reshape(len(integer_encoded), 1)
+        ohe = ohe.fit(integer_encoded)
+
+        onehot_encoded = ohe.transform(integer_encoded)
+        onehot_encoded_df = pd.DataFrame(onehot_encoded)
+        onehot_encoded_df.columns = list(map(lambda x: str(x) + '_' + col, onehot_encoded_df.columns.values))
+
+        df = pd.concat([df, onehot_encoded_df], axis=1)
+
+    return df
+
+# 统计特征生成
+# count编码
+def count_code(df,to_count_fea_lst):
+    fea_cols=[]
+    for f in tdqm(to_count_fea_lst):
+        df[f+'_count'] = df[f].map(df[f].value_counts())
+        fea_cols.append(f+'_count')
+    return df,fea_cols
+
+# 用数值特征对类别特征做统计刻画
+def stat_code(df,numeric_fea,category_fea):
+    feat_cols = []
+    for f1 in tqdm(category_fea):
+        group = df.groupby(f1, as_index=False)
+        for f2 in tqdm(numeric_fea):
+            feat = group[f2].agg({
+                '{}_{}_max'.format(f1, f2): 'max', '{}_{}_min'.format(f1, f2): 'min',
+                '{}_{}_median'.format(f1, f2): 'median', '{}_{}_mean'.format(f1, f2): 'mean',
+                '{}_{}_std'.format(f1, f2): 'std', '{}_{}_mad'.format(f1, f2): 'mad'
+            })
+            df = df.merge(feat, on=f1, how='left')
+            feat_list = list(feat.columns)
+            feat_list.remove(f1)
+            feat_cols.extend(feat_list)
+    return df,feat_cols
 
 
+### 类别特征的二阶交叉
+def feature_cross(df,cross_feat_lst,index_col):
+    # param cross_feat_lst:[[col1,col2],[col1,col3],[col2,col3]]
+    # param index_col: eg(series_id)
+    feat_cols=[]
+    for f_pair in tqdm(cross_feat_lst):
+        ### 共现次数
+        df['_'.join(f_pair) + '_count'] = df.groupby(f_pair)[index_col].transform('count')
+        ### nunique、熵
+        df = data.merge(df.groupby(f_pair[0], as_index=False)[f_pair[1]].agg({
+            '{}_{}_nunique'.format(f_pair[0], f_pair[1]): 'nunique',
+            '{}_{}_ent'.format(f_pair[0], f_pair[1]): lambda x: entropy(x.value_counts() / x.shape[0])
+        }), on=f_pair[0], how='left')
+        df = data.merge(df.groupby(f_pair[1], as_index=False)[f_pair[0]].agg({
+            '{}_{}_nunique'.format(f_pair[1], f_pair[0]): 'nunique',
+            '{}_{}_ent'.format(f_pair[1], f_pair[0]): lambda x: entropy(x.value_counts() / x.shape[0])
+        }), on=f_pair[1], how='left')
+        ### 比例偏好
+        df['{}_in_{}_prop'.format(f_pair[0], f_pair[1])] = df['_'.join(f_pair) + '_count'] / df[f_pair[1] + '_count']
+        df['{}_in_{}_prop'.format(f_pair[1], f_pair[0])] = df['_'.join(f_pair) + '_count'] / df[f_pair[0] + '_count']
 
-
-
-
-
+        feat_cols.extend([
+            '_'.join(f_pair) + '_count',
+            '{}_{}_nunique'.format(f_pair[0], f_pair[1]), '{}_{}_ent'.format(f_pair[0], f_pair[1]),
+            '{}_{}_nunique'.format(f_pair[1], f_pair[0]), '{}_{}_ent'.format(f_pair[1], f_pair[0]),
+            '{}_in_{}_prop'.format(f_pair[0], f_pair[1]), '{}_in_{}_prop'.format(f_pair[1], f_pair[0])
+        ])
+    return df,feat_cols
 
 
 
