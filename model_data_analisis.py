@@ -8,7 +8,7 @@ import pickle
 import matplotlib.pyplot as plt
 import seaborn as sns
 from tdqm import tdqm
-from scipy.stats import mode
+from scipy.stats import mode,entropy
 from sklearn.preprocessing import LabelEncoder,OneHotEncoder
 sns.set(style="darkgrid", palette="muted", color_codes=True, context='paper')
 sns.set_style({'font.sans-serif': ['simhei', 'Arial']})
@@ -163,7 +163,7 @@ def feature_type(df):
     g = g.map(sns.distplot,"value")
     return numerical_fea,category_fea
 
-# 分类变量统计
+# 分类变量统计量
 def sta_cate(df, category_fea):
     sta_df = pd.DataFrame(
         columns=['column', 'nunique', 'miss_rate', 'most_value', 'most_value_counts', 'max_value_counts_rate'])
@@ -308,11 +308,11 @@ def feature_cross(df,cross_feat_lst,index_col):
         ### 共现次数
         df['_'.join(f_pair) + '_count'] = df.groupby(f_pair)[index_col].transform('count')
         ### nunique、熵
-        df = data.merge(df.groupby(f_pair[0], as_index=False)[f_pair[1]].agg({
+        df = df.merge(df.groupby(f_pair[0], as_index=False)[f_pair[1]].agg({
             '{}_{}_nunique'.format(f_pair[0], f_pair[1]): 'nunique',
             '{}_{}_ent'.format(f_pair[0], f_pair[1]): lambda x: entropy(x.value_counts() / x.shape[0])
         }), on=f_pair[0], how='left')
-        df = data.merge(df.groupby(f_pair[1], as_index=False)[f_pair[0]].agg({
+        df = df.merge(df.groupby(f_pair[1], as_index=False)[f_pair[0]].agg({
             '{}_{}_nunique'.format(f_pair[1], f_pair[0]): 'nunique',
             '{}_{}_ent'.format(f_pair[1], f_pair[0]): lambda x: entropy(x.value_counts() / x.shape[0])
         }), on=f_pair[1], how='left')
