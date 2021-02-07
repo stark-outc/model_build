@@ -632,10 +632,10 @@ def get_sql_data(sql):
     :return:DataFrame
     """
     con = pymysql.connect(
-        host='rm-uf64ke75ks7qhx2fq.mysql.rds.aliyuncs.com',
-        user='hztest_readonly',
-        passwd='xd1moBv123AJ0909',
-        db='risk-data-testing',
+        host='',
+        user='',
+        passwd='',
+        db='',
         port=3306,
         cursorclass=pymysql.cursors.DictCursor,
         charset='utf8')
